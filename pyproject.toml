@@ -1,0 +1,17 @@
+[tool.poetry]
+name = "iqama-times"
+version = "0.1.0"
+description = "Generates iqama schedule given user inputs"
+authors = ["Faraz Shaikh <faraz.ns97@gmail.com>"]
+readme = "README.md"
+packages = [{include = "iqama_times"}]
+
+[tool.poetry.dependencies]
+python = "^3.7"
+pandas = "^1.5.3"
+requests = "^2.28.2"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

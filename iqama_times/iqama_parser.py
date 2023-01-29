@@ -4,19 +4,20 @@ from datetime import time
 
 pd.options.mode.chained_assignment = None  # default='warn'
 
-class buildIqamaSchedule: 
+class BuildIqamaSchedule: 
     def __init__(
         self,
         address: str, 
         year: int,
         fajr_delay: int,
         asr_delay: int, 
-        dahur_time: str = "1:30",
+        dhuhr_time: str = "1:30",
         maghrib_delay: int = 10, 
         isha_delay: int = 10, 
         maghrib_ramzan_delay: int = 15, 
         method: int = 2,
         min_fajar_time: str = "5:00",
+        min_isha_time = str = "8:15",
         max_isha_time: str = "9:30",
         ramzan_start: str = None, 
         ramzan_end: str = None,
@@ -27,7 +28,7 @@ class buildIqamaSchedule:
         
         self.method = method
         self.fajr_delay = fajr_delay
-        self.dahur_time = dahur_time
+        self.dhuhr_time = dhuhr_time
         self.asr_delay = asr_delay
         self.maghrib_delay = maghrib_delay
         self.isha_delay = isha_delay
@@ -35,6 +36,7 @@ class buildIqamaSchedule:
         self.ramzan_end = ramzan_end
         self.maghrib_ramzan_delay = maghrib_ramzan_delay
         self.min_fajar_time = min_fajar_time
+        self.min_isha_time = min_isha_time
         self.max_isha_time = max_isha_time
         self.prayer_cols = ["Fajr", "Dhuhr", "Asr", "Maghrib", "Isha"]
 
@@ -47,6 +49,8 @@ class buildIqamaSchedule:
             year (int): Year to generate adhan times
             method (int): Method of selection see: https://aladhan.com/calculation-methods
 
+        Returns: 
+            requests.Response: response from api call as a Response object
         """
         url = "http://api.aladhan.com/v1/calendarByAddress"
         filters = {
@@ -96,21 +100,24 @@ class buildIqamaSchedule:
         return df
 
     @staticmethod
-    def parse_date_time(time_string: str) -> list:  
+    def parse_date_time(time_string: str) -> tuple:  
         """Extracts hour and minute from time formatted as hh:mm """
-        return time_string.split(sep=":") 
+        split = time_string.split(sep=":") 
+        return (int(split[0]), int(split[1]))
     
     def update_fajr(self, fajr: pd.Series) -> pd.Series:
-        """Updates fajar time based on certain parameters
+        """Updates Fajr time based on certain parameters
+
         Args:
-            fajr (pd.Series): Pandas series containing fajar datetime stamps
+            fajr (pd.Series): Pandas series containing Fajr datetime stamps
 
         Returns:
             pd.Series: Updates Fajr columns based on user inputs
         """
-        time_split = parse_date_time(self.min_fajar_time)
+        time_split = BuildIqamaSchedule.parse_date_time(self.min_fajar_time)
         #applies minimum time for fajar
-        fajr.loc[fajr.dt.time < time(time_split[0], time_split[1])] = fajr.loc[fajr.dt.time < time(time_split[0], time_split[1])].apply(
+        mask = fajr.dt.time < time(time_split[0], time_split[1])
+        fajr.loc[mask] = fajr.loc[mask].apply(
             lambda x: x.replace(hour=time_split[0], minute=time_split[1])
         )
         fajr = fajr + pd.Timedelta(minutes=self.fajr_delay)
@@ -119,20 +126,53 @@ class buildIqamaSchedule:
         return fajr
 
 
-    def update_dahur(dahur: pd.Series) -> pd.Series:
-        dahur.loc[dahur.dt.time < time(5, 00)] = dahur.loc[dahur.dt.time < time(5, 00)].apply(
-            lambda x: x.replace(hour=5, minute=0)
-        )
-        dahur = dahur + pd.Timedelta(minutes=self.dahur_delay)
-        dahur = dahur.dt.ceil(freq="15T")
-        dahur = pd.to_datetime(dahur, format="%H:%M").dt.time
-        pass
+    def update_dhuhr(self, dhuhr: pd.Series) -> pd.Series:
+        """ Updates dhuhr prayer time based on user specification
 
+        Args:
+            dhuhr (pd.Series): Pandas series containing dhuhr datetime stamps
 
-    def update_maghrib(maghrib: pd.Series) -> pd.Series:
-        pass
+        Returns:
+            pd.Series: Updates dhuhr columns based on user inputs
+        """
+        time_split = BuildIqamaSchedule.parse_date_time(self.dhuhr_time)
+        dhuhr = dhuhr.apply(lambda x: x.replace(hour=time_split[0], minute=time_split[1]))
+        dhuhr = pd.to_datetime(dhuhr, format="%H:%M").dt.time
+        return dhuhr
+    
+    def update_asr(self, asr: pd.Series) -> pd.Series:
+        """ Updates dhuhr prayer time based on user specification
 
+        Args:
+            dhuhr (pd.Series): Pandas series containing dhuhr datetime stamps
 
+        Returns:
+            pd.Series: Updates dhuhr columns based on user inputs
+        """
+        asr = asr + pd.Timedelta(minutes=self.asr_delay)
+        asr = asr.dt.ceil(freq="15T")
+        asr = pd.to_datetime(asr, format="%H:%M").dt.time
+        return dhuhr
+    
+    def update_maghrib(self, maghrib: pd.Series) -> pd.Series:
+        """ Updates maghrib prayer time based on user specification
+
+        Args:
+            dhuhr (pd.Series): Pandas series containing maghrib datetime stamps
+
+        Returns:
+            pd.Series: Updates maghrib columns based on user inputs
+        
+        Notes: 
+            - Uses ramzan start and end to update based on those specifications
+        """
+        mask = (maghrib > self.ramzan_start) & (maghrib <= self.ramzan_end)
+        maghrib.loc[mask] = maghrib.loc[mask] + pd.Timedelta(minutes=self.maghrib_ramzan_delay)
+        maghrib.loc[~mask] = maghrib.loc[~mask] + pd.Timedelta(minutes=self.maghrib_delay)
+        #maghrib = maghrib.dt.ceil(freq="15T")
+        maghrib = pd.to_datetime(maghrib, format="%H:%M").dt.time
+        return maghrib
+        
     def update_isha(isha: pd.Series) -> pd.Series:
         pass
 
@@ -142,7 +182,7 @@ class buildIqamaSchedule:
         if resp.status_code == 200: 
             df = self.build_adhan_df(resp.json())
             df["Fajr_iqama"] = update_fajr(df["Fajr"])
-            df["Dahur_iqama"] = update_dahur(df["Dahur"])
+            df["Dhuhr_iqama"] = update_dhuhr(df["Dhuhr"])
             df["Asr_iqama"] = update_fajr(df["Asr"])
-            df["Maghrib_iqama"] = update_dahur(df["Maghrib"])
-            df["Isha_iqama"] = update_dahur(df["Isha"])
+            df["Maghrib_iqama"] = update_maghrib(df["Maghrib"])
+            df["Isha_iqama"] = update_isha(df["Isha"])
